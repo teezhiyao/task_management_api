@@ -55,26 +55,12 @@ def get_db():
     finally:
         db.close()
 
-# # Role-based access control dependency
-# def role_required(allowed_roles: List[str]):
-#     def check_role(current_user: schemas.UserResponse = Depends(crud.get_user_by_id)):
-#         if current_user.role not in allowed_roles:
-#             raise HTTPException(
-#                 status_code=403,
-#                 detail="You do not have permission to perform this action."
-#             )
-#         return current_user
-#     return check_role
-
-
 async def get_current_user(
     security_scopes: SecurityScopes, token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
 ):
-    print("hello get current")
 
     if security_scopes.scopes:
         authenticate_value = f'Bearer scope="{security_scopes.scope_str}"'
-        print("sec scope", authenticate_value)
     else:
         authenticate_value = "Bearer"
     credentials_exception = HTTPException(
@@ -85,11 +71,6 @@ async def get_current_user(
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        print(username)
-        print("Token:", token)
-        print("Payload:", payload)
-        print("Scopes:", security_scopes.scopes)
-        print("User:", username)
         if username is None:
             raise credentials_exception
         token_scopes = payload.get("scopes", [])
@@ -138,10 +119,8 @@ async def login_for_access_token(user: Annotated[OAuth2PasswordRequestForm, Depe
 
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    print('user username', user.username)
-    print(user_db_info.role_id)
+
     role_mapping = {1:"employer", 2:"employee"}
-    print('scope', [role_mapping[user_db_info.role_id]])
 
     access_token = create_access_token(
         data={"sub": user.username, "scopes": [role_mapping[user_db_info.role_id]]},
