@@ -17,7 +17,7 @@ from fastapi.security import (
 from pydantic import BaseModel, ValidationError
 
 
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 300
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -151,51 +151,63 @@ async def login_for_access_token(user: Annotated[OAuth2PasswordRequestForm, Depe
     return schemas.Token(access_token=access_token, token_type="bearer")
 
 # Create new task
-@app.post("/task", response_model=schemas.TaskBase)
+@app.post("/task", response_model=schemas.TaskResponse)
 async def create_task(
-    task: schemas.TaskBase,
+    task: schemas.TaskCreate,
     current_user: Annotated[schemas.UserResponse, Security(get_current_active_user, scopes=["employer"])],
     db: Session = Depends(get_db)
 ):
     return crud.create_task(task, db)
-#
-# # View all tasks (with filter and sort)
-# @app.get("/task", response_model=list[schemas.TaskBase])
-# def get_tasks(
-#     status: str = None,
-#     sort_by: str = "creation_date",
-#     db: Session = Depends(get_db),
-#     current_user: schemas.UserResponse = Depends(role_required(["Employee", "Employer"]))  # Allow both roles
-# ):
-#     if current_user.role == "Employee":
-#         return crud.get_tasks(assignee_id=current_user.id, status=status, sort_by=sort_by, db=db)
-#     return crud.get_tasks(status=status, sort_by=sort_by, db=db)
-#
-# # # Employee Task Summary
-# # @app.get("/task/all", response_model=list[schemas.EmployeeTaskSummary])
-# # def get_employee_task_summary(
-# #     db: Session = Depends(get_db),
-# #     current_user: schemas.UserResponse = Depends(role_required(["Employer"]))
-# # ):
-# #     return crud.get_employee_task_summary(db)
-#
-# # Update a task
-# @app.put("/task", response_model=schemas.TaskBase)
-# def update_task(task_id: int, task_update: schemas.TaskBase, db: Session = Depends(get_db), current_user: schemas.UserResponse = Depends(role_required(["Employee", "Employer"]))):
-#     return crud.update_task(task_id, task_update, db)
-#
-# # Assign a task
-# @app.put("/task/{user_id}", response_model=schemas.TaskBase)
-# def assign_task(
-#     user_id: int,
-#     task_id: int,
-#     db: Session = Depends(get_db),
-#     current_user: schemas.UserResponse = Depends(role_required(["Employer"]))
-# ):
-#     return crud.assign_task(user_id, task_id, db)
-#
-# # Get tasks of a user
-# @app.get("/user/task", response_model=list[schemas.TaskBase])
-# def get_user_tasks(db: Session = Depends(get_db), current_user: schemas.UserResponse = Depends(crud.get_current_user)):
-#     return crud.get_user_tasks(current_user.id, db)
+
+# View all tasks (with filter and sort)
+@app.get("/task", response_model=list[schemas.TaskResponse])
+def get_tasks(
+    current_user: Annotated[schemas.UserResponse, Security(get_current_active_user)],
+    assignee_id: int = None,
+    status: str = None,
+    sort_by: str = None,
+    status_order: str = None,
+    db: Session = Depends(get_db),
+):
+    if current_user.role_id == 2:
+        return crud.get_tasks(assignee_id=current_user.user_id, status=status, sort_by=sort_by, status_order=status_order, db=db)
+    return crud.get_tasks(assignee_id=assignee_id, status=status, sort_by=sort_by, status_order=status_order, db=db)
+
+# Employee Task Summary
+@app.get("/user/summary", response_model=list[schemas.EmployeeTaskSummary])
+def get_employee_task_summary(
+    current_user: Annotated[schemas.UserResponse, Security(get_current_active_user, scopes=["employer"])],
+    db: Session = Depends(get_db)):
+    return crud.get_employee_task_summary(db)
+
+
+# Updating a task, includes assign a task or updating the status
+@app.put("/task/{task_id}", response_model=schemas.TaskBase)
+def assign_task(
+    task_data: schemas.TaskBase,
+    task_id: int,
+    current_user: Annotated[schemas.UserResponse, Security(get_current_active_user)],
+    db: Session = Depends(get_db)
+):
+    # Define allowed updates based on role_id
+    allowed_fields_by_role = {
+        1: ["assignee_id", "task_name", "task_description", "due_date", "status"],  # Employer
+        2: ["status"],  # Employee can only update the status
+    }
+
+    # Get the allowed fields for the current user's role
+    allowed_fields = allowed_fields_by_role.get(current_user.role_id, [])
+    # Extract only the allowed fields from the incoming data
+    update_data = {key: value for key, value in task_data.dict(exclude_unset=True).items() if key in allowed_fields}
+
+    if not update_data:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to update these attributes."
+        )
+
+    updated_task = crud.update_task(task_data.dict(exclude_unset=True), task_id, db)
+    if not updated_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return updated_task
 

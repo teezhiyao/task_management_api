@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS Tasks (
     task_description TEXT NULL,
     creation_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     due_date DATE NULL,
-    status ENUM('Pending', 'In Progress', 'Completed') NOT NULL DEFAULT 'Pending',
+    status ENUM('pending', 'in_progress', 'completed') NOT NULL DEFAULT 'pending',
     FOREIGN KEY (assignee_id) REFERENCES Users(user_id) ON DELETE CASCADE
 );
 

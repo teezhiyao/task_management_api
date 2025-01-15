@@ -34,19 +34,26 @@ class UserResponse(UserBase):
 
         
 class TaskBase(BaseModel):
-    task_name: str
     task_description: Optional[str] = None
-    status: Optional[str] = "pending" # Expected values: "Pending", "In Progress", "Completed"
-    due_date: Optional[str] = None  # Format: YYYY-MM-DD
+    status: Optional[str] = None # Expected values: "Pending", "In Progress", "Completed"
+    due_date: Optional[datetime] = datetime.now()  # Format: YYYY-MM-DD
     creation_date: Optional[datetime] = datetime.now()
     assignee_id: Optional[int] = None
 
-# class TaskCreate(TaskBase):
-#     task_id: int
-#     # assignee_id: int
+class TaskCreate(TaskBase):
+    task_name: str
 
 class TaskResponse(TaskBase):
     task_id: int
+
+    class Config:
+        orm_mode = True
+
+class EmployeeTaskSummary(BaseModel):
+    user_id: int
+    username: str
+    total_tasks: int
+    completed_tasks: int
 
     class Config:
         orm_mode = True

@@ -2,9 +2,13 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 from passlib.context import CryptContext
 from fastapi import HTTPException
+from sqlalchemy.sql import case, func
+from dotenv import load_dotenv
+import os
 
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
-ALGORITHM = "HS256"
+load_dotenv()
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -47,9 +51,10 @@ def create_task(task: schemas.TaskBase, db: Session):
 def get_task_by_id(task_id: int, db: Session):
     return db.query(models.Task).filter(models.Task.id == task_id).first()
 
-def get_tasks(assignee_id: int = None, status: str = None, sort_by: str = None, db: Session = None):
+def get_tasks(assignee_id: int = None, status: str = None, sort_by: str = None, status_order: str = None, db: Session = None):
     query = db.query(models.Task)
-    
+    print("assignee_id ", assignee_id)
+    print("status ", status)
     if assignee_id:
         query = query.filter(models.Task.assignee_id == assignee_id)
     if status:
@@ -58,41 +63,46 @@ def get_tasks(assignee_id: int = None, status: str = None, sort_by: str = None, 
         query = query.order_by(models.Task.creation_date)
     elif sort_by == "due_date":
         query = query.order_by(models.Task.due_date)
-    
+
+    if status_order:
+        case_statement = case(
+            (models.Task.status == status_order, 0),  # Rank `prioritize_status` as 0
+            else_=1  # Rank all other statuses as 1
+        )
+        query = query.order_by(case_statement)
+
     return query.all()
 
-def assign_task(user_id: int, task_id: int, db: Session):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+def update_task(update_data: dict, task_id: int, db: Session):
+    task = db.query(models.Task).filter(models.Task.task_id == task_id).first()
     if not task:
         return None
-    task.assignee_id = user_id
+
+    # Update the task with the provided data
+    for key, value in update_data.items():
+        setattr(task, key, value)
+
     db.commit()
     db.refresh(task)
     return task
 
-def update_task_status(task_id: int, status: str, db: Session):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
-    if not task:
-        return None
-    task.status = status
-    db.commit()
-    db.refresh(task)
-    return task
 
 
 # Summary Operations
 def get_employee_task_summary(db: Session):
-    users = db.query(models.User).filter(models.User.role == "Employee").all()
-    summary = []
-    for user in users:
-        total_tasks = db.query(models.Task).filter(models.Task.assignee_id == user.id).count()
-        completed_tasks = db.query(models.Task).filter(
-            models.Task.assignee_id == user.id, models.Task.status == "Completed"
-        ).count()
-        summary.append({
-            "user_id": user.id,
-            "name": user.name,
-            "total_tasks": total_tasks,
-            "completed_tasks": completed_tasks
-        })
-    return summary
+    completed_tasks_case = case(
+        (models.Task.status == "completed", 1), else_=0
+    )
+
+    query = (
+        db.query(
+            models.User.user_id,
+            models.User.username,
+            func.count(models.Task.task_id).label("total_tasks"),
+            func.sum(completed_tasks_case).label("completed_tasks"),
+        )
+        .join(models.Task, models.User.user_id == models.Task.assignee_id, isouter=True)
+        .group_by(models.User.user_id)
+        .order_by(models.User.user_id)
+    )
+    return query.all()
